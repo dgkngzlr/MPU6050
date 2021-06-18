@@ -1,16 +1,21 @@
-#include <Kalman.h>
 #include<Wire.h>
 #include<math.h>
 
-Kalman kalmanX;
-Kalman kalmanY;
+const int MPU_adr = 0x68;
+const int pi = 3.14159265;
 
-const int MPU_adr = 0x68; //MPU6050 nin slave adresi.
+long time_pre;
 long AcX,AcY,AcZ,GyX,GyY,GyZ;
 float gForceX,gForceY,gForceZ,rotX,rotY,rotZ;
 
 float pitch_acc, roll_acc;
 float pitch_gyro,roll_gyro;
+float pitch_comp,roll_comp;
+
+float delta_angleX,delta_angleY;
+
+float errP,errR;
+float errPt,errRt = 0;
 
 void setup() {
   Serial.begin(9600);
@@ -22,16 +27,33 @@ void setup() {
   gyroDeg();
   pitch_gyro = pitch_acc;
   roll_gyro = roll_acc;
-  kalmanX.setAngle(pitch_acc); // Set starting angle
-  kalmanY.setAngle(roll_acc);
-
+  pitch_comp = pitch_acc;
+  roll_comp = roll_acc;
+  for(int i = 0; i<100;i++){
+    recordAccelRegisters();
+    accelDeg();
+    errPt += pitch_acc;
+    errRt += roll_acc;
+    delay(10);
+    }
+  errP = errPt/100.0;
+  errR = errRt/100.0;
+  
+  Serial.print("Pitch error :");
+  Serial.print(errP);
+  Serial.print(" Roll error :");
+  Serial.println(errR);
+  
 }
 
 void loop() {
   recordAccelRegisters();
   recordGyroRegisters();
+  compDeg();
   accelDeg();
   gyroDeg();
+  time_pre = millis();
+  delay(10);
 }
 
 void configMPU(){
@@ -48,9 +70,7 @@ void configMPU(){
   Wire.write(0b00000000); // +-250 deg/sec ayarlandı. (0000 0000)+-250, (0000 1000) +-500, (0001 0000) +-1000, (0001 1000)+-2000
   Wire.endTransmission();
   
-  
   }
-
 void recordAccelRegisters(){
   Wire.beginTransmission(MPU_adr);
   Wire.write(0x3B);//Starting register for accel reading 3B-40
@@ -66,9 +86,8 @@ void recordAccelRegisters(){
    gForceX = AcX / 16384.0; // Datasheete bak. Anlamlı verilere dondu.
    gForceY = AcY / 16384.0;
    gForceZ = AcZ / 16384.0;
-  
-  
   }
+
 void recordGyroRegisters(){
 
   Wire.beginTransmission(MPU_adr);
@@ -86,43 +105,35 @@ void recordGyroRegisters(){
   rotZ = GyZ / 131.0;
   
   }
-void printValues(){
-  Serial.print("Accel(g force)");
-  Serial.print(" X:");
-  Serial.print(gForceX);
-  Serial.print(" Y:");
-  Serial.print(gForceY);
-  Serial.print(" Z:");
-  Serial.println(gForceZ);
-  Serial.print("Gyro(deg/s)");
-  Serial.print(" X:");
-  Serial.print(rotX);
-  Serial.print(" Y:");
-  Serial.print(rotY);
-  Serial.print(" Z:");
-  Serial.println(rotZ);
-  }
+
 void accelDeg(){
-  /*float R = sqrt(gForceX*gForceX+gForceY*gForceY+gForceZ*gForceZ);
-  X_deg_acc = (180*acos(gForceX/sqrt(gForceX*gForceX+gForceZ*gForceZ))/3.14)-90;
-  Y_deg_acc = (180*acos(gForceY/sqrt(gForceY*gForceY+gForceZ*gForceZ))/3.14)-90;*/
 
-  
-  pitch_acc = atan2(-gForceX,gForceZ)*180/3.141591;
-  roll_acc = atan2(gForceY,gForceZ)*180/3.141591;
+  pitch_acc = atan2(-gForceX,gForceZ)*180/pi;
+  roll_acc = atan2(gForceY,gForceZ)*180/pi;
   
   }
-void gyroDeg(){
-  unsigned long pre_time = millis();
-  delay(10);
-  float delta_angle = rotY * (millis() - pre_time)/1000;
-  pitch_gyro = pitch_gyro + delta_angle*2;
-  
-  /*Serial.println(pitch_gyro);
-  Serial.print(",");
-  Serial.println(pitch_acc);
-  Serial.print(",");*/
-  Serial.println(kalmanX.getAngle(pitch_acc,pitch_gyro,0.001));  
 
+void gyroDeg(){
+  
+  delta_angleY = rotY * (millis() - time_pre)/1000;
+  delta_angleX = rotX * (millis() - time_pre)/1000;
+  
+  pitch_gyro = pitch_gyro + delta_angleY;
+  roll_gyro = roll_gyro + delta_angleX;
    
+   
+  }
+
+void compDeg(){
+
+  pitch_comp = 0.98 * (pitch_comp + delta_angleY ) + 0.02 * (pitch_acc);
+  roll_comp = 0.98 * (roll_comp + delta_angleX ) + 0.02 * (roll_acc);
+
+  Serial.print("Pitch :");
+  Serial.print(pitch_comp-errP);
+  Serial.print(",");
+  Serial.print("Roll :");
+  Serial.print(roll_comp-errR);
+  Serial.println(",");
+  
   }
